@@ -109,30 +109,6 @@ Feel free to fork this repository and submit pull requests for any improvements.
 
 For any questions or suggestions, please open an issue in this repository.
 
-## 🚀 GitHub Upload Instructions
-
-1. Create a new repository on GitHub
-2. Initialize git in your local project:
-   ```bash
-   git init
-   ```
-3. Add all files:
-   ```bash
-   git add .
-   ```
-4. Commit the changes:
-   ```bash
-   git commit -m "Initial commit: Alien Escape Game"
-   ```
-5. Add your GitHub repository as remote:
-   ```bash
-   git remote add origin https://github.com/YOUR_USERNAME/Alien-Escape-Game.git
-   ```
-6. Push the code:
-   ```bash
-   git push -u origin main
-   ```
-
 ## 📁 Project Structure
 
 ```
@@ -141,4 +117,4 @@ For any questions or suggestions, please open an issue in this repository.
 ├── 📄 README.md            (Project documentation)
 ├── 📄 LICENSE             (MIT License)
 └── 📄 .gitignore          (Git ignore file)
-``` 
+```
