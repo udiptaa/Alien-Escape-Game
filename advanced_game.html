@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alien Escape - Advanced</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: Arial, sans-serif;
+            color: #fff;
+        }
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        #game-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            border-radius: 5px;
+            z-index: 1;
+        }
+        #level-info {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #00ff00;
+        }
+        #timer {
+            font-size: 24px;
+            margin-bottom: 10px;
+            color: #00ff00;
+        }
+        #algo-info {
+            font-size: 18px;
+            color: #00ffff;
+            margin-bottom: 6px;
+        }
+        #controls {
+            font-size: 18px;
+            color: #ffff00;
+        }
+        #rules {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 10px;
+            background-color: rgba(0, 0, 0, 0.7);
+            border-radius: 5px;
+            max-width: 300px;
+        }
+        .level-complete {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.9);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+        }
+        .level-complete.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="ui-overlay">
+            <div id="level-info">Level: 1</div>
+            <div id="timer">Time: 50:00</div>
+            <div id="algo-info" style="font-size:18px;color:#00ffff;margin-bottom:6px;"></div>
+            <div id="controls">Controls: WASD or Arrow keys to move</div>
+            <button id="restart-btn" style="margin-top:10px;padding:6px 16px;font-size:16px;background:#222;color:#fff;border-radius:5px;border:none;cursor:pointer;">Restart</button>
+        </div>
+        <div id="rules">
+            <h3>Game Rules:</h3>
+            <ul>
+                <li>Complete 5 levels to win</li>
+                <li>Each level has different challenges</li>
+                <li>Collect keys to unlock doors</li>
+                <li>Avoid guards and traps</li>
+                <li>Complete level within time limit</li>
+            </ul>
+        </div>
+        <canvas id="game-canvas"></canvas>
+        <div class="level-complete">
+            <h2>Level Complete!</h2>
+            <p>Press SPACE to continue</p>
+        </div>
+    </div>
+
+    <!-- Load Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.159.0/three.min.js"></script>
+    <!-- Load GLTFLoader for custom models -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.159.0/examples/js/loaders/GLTFLoader.min.js"></script>
+    
+    <script>
+        // Game configuration
+        const config = {
+            levels: [
+                {
+                    name: "Training Ground",
+                    timeLimit: 60,
+                    guards: 1,
+                    keys: 1,
+                    doors: 1,
+                    background: "#1a1a1a",
+                    guardSpeed: 0.08
+                },
+                {
+                    name: "Security Checkpoint",
+                    timeLimit: 55,
+                    guards: 2,
+                    keys: 2,
+                    doors: 2,
+                    background: "#2a2a2a",
+                    guardSpeed: 0.09
+                },
+                {
+                    name: "Research Lab",
+                    timeLimit: 50,
+                    guards: 2,
+                    keys: 3,
+                    doors: 3,
+                    background: "#3a3a3a",
+                    guardSpeed: 0.11
+                },
+                {
+                    name: "Control Room",
+                    timeLimit: 45,
+                    guards: 2,
+                    keys: 4,
+                    doors: 4,
+                    background: "#4a4a4a",
+                    guardSpeed: 0.12
+                },
+                {
+                    name: "Escape Route",
+                    timeLimit: 40,
+                    guards: 2,
+                    keys: 5,
+                    doors: 5,
+                    background: "#5a5a5a",
+                    guardSpeed: 0.13
+                },
+                {
+                    name: "Final Challenge",
+                    timeLimit: 35,
+                    guards: 3,
+                    keys: 6,
+                    doors: 6,
+                    background: "#6a6a6a",
+                    guardSpeed: 0.15
+                }
+            ]
+        };
+
+        // Initialize Three.js
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('game-canvas'), antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+
+        // --- Grid and Pathfinding Setup ---
+        const GRID_SIZE = 1; // 1 unit per cell
+        const GRID_WIDTH = 20;
+        const GRID_HEIGHT = 20;
+        function toGrid(x, z) {
+            return [Math.round(x / GRID_SIZE) + GRID_WIDTH/2, Math.round(z / GRID_SIZE) + GRID_HEIGHT/2];
+        }
+        function fromGrid(gx, gz) {
+            return [(gx - GRID_WIDTH/2) * GRID_SIZE, (gz - GRID_HEIGHT/2) * GRID_SIZE];
+        }
+        // Simple BFS implementation for pathfinding
+        function bfs(grid, start, goal) {
+            const queue = [[start]];
+            const visited = new Set();
+            visited.add(start.toString());
+            while (queue.length > 0) {
+                const path = queue.shift();
+                const [x, z] = path[path.length - 1];
+                if (x === goal[0] && z === goal[1]) return path;
+                for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+                    const nx = x + dx, nz = z + dz;
+                    if (nx < 0 || nz < 0 || nx >= GRID_WIDTH || nz >= GRID_HEIGHT) continue;
+                    if (grid[nx][nz] === 1) continue; // wall
+                    const key = [nx, nz].toString();
+                    if (!visited.has(key)) {
+                        visited.add(key);
+                        queue.push([...path, [nx, nz]]);
+                    }
+                }
+            }
+            return null;
+        }
+
+        // --- Pathfinding Algorithms ---
+        // DFS
+        function dfs(grid, start, goal) {
+            const stack = [[start]];
+            const visited = new Set();
+            visited.add(start.toString());
+            
+            while (stack.length > 0) {
+                const path = stack.pop();
+                const [x, z] = path[path.length - 1];
+                
+                if (x === goal[0] && z === goal[1]) {
+                    return path;
+                }
+                
+                // Try all possible moves in a specific order
+                const moves = [
+                    [1, 0],  // right
+                    [0, 1],  // forward
+                    [-1, 0], // left
+                    [0, -1]  // backward
+                ];
+                
+                for (const [dx, dz] of moves) {
+                    const nx = x + dx;
+                    const nz = z + dz;
+                    
+                    if (nx < 0 || nz < 0 || nx >= GRID_WIDTH || nz >= GRID_HEIGHT) continue;
+                    if (grid[nx][nz] === 1) continue; // wall
+                    
+                    const key = [nx, nz].toString();
+                    if (!visited.has(key)) {
+                        visited.add(key);
+                        stack.push([...path, [nx, nz]]);
+                    }
+                }
+            }
+            return null;
+        }
+        // Greedy Best-First Search
+        function greedy(grid, start, goal) {
+            function heuristic(a, b) {
+                return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+            }
+            const open = [[start, [start], heuristic(start, goal)]];
+            const visited = new Set();
+            visited.add(start.toString());
+            while (open.length > 0) {
+                open.sort((a, b) => a[2] - b[2]);
+                const [current, path] = open.shift();
+                const [x, z] = current;
+                if (x === goal[0] && z === goal[1]) return path;
+                for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+                    const nx = x + dx, nz = z + dz;
+                    if (nx < 0 || nz < 0 || nx >= GRID_WIDTH || nz >= GRID_HEIGHT) continue;
+                    if (grid[nx][nz] === 1) continue;
+                    const key = [nx, nz].toString();
+                    if (!visited.has(key)) {
+                        visited.add(key);
+                        open.push([[nx, nz], [...path, [nx, nz]], heuristic([nx, nz], goal)]);
+                    }
+                }
+            }
+            return null;
+        }
+        // A* Search
+        function astar(grid, start, goal) {
+            function heuristic(a, b) {
+                return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+            }
+            const open = [[start, [start], 0, heuristic(start, goal)]]; // [pos, path, g, f]
+            const visited = new Set();
+            visited.add(start.toString());
+            while (open.length > 0) {
+                open.sort((a, b) => (a[2] + a[3]) - (b[2] + b[3]));
+                const [current, path, g, f] = open.shift();
+                const [x, z] = current;
+                if (x === goal[0] && z === goal[1]) return path;
+                for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+                    const nx = x + dx, nz = z + dz;
+                    if (nx < 0 || nz < 0 || nx >= GRID_WIDTH || nz >= GRID_HEIGHT) continue;
+                    if (grid[nx][nz] === 1) continue;
+                    const key = [nx, nz].toString();
+                    if (!visited.has(key)) {
+                        visited.add(key);
+                        const g2 = g + 1;
+                        const h2 = heuristic([nx, nz], goal);
+                        open.push([[nx, nz], [...path, [nx, nz]], g2, h2]);
+                    }
+                }
+            }
+            return null;
+        }
+
+        // --- Game State ---
+        let currentLevel = 0;
+        let gameTime = config.levels[currentLevel].timeLimit;
+        let isGameOver = false;
+        let isLevelComplete = false;
+        let player, guards = [], keysArr = [], door, keyMeshes = [], doorMesh, wallMeshes = [];
+        let grid;
+        let lastTimerUpdate = Date.now();
+        let mouseTarget = null;
+        let mouseMoving = false;
+        const canvas = document.getElementById('game-canvas');
+        canvas.addEventListener('mousedown', (e) => {
+            mouseMoving = true;
+            setMouseTarget(e);
+        });
+        canvas.addEventListener('mousemove', (e) => {
+            if (mouseMoving) setMouseTarget(e);
+        });
+        canvas.addEventListener('mouseup', () => {
+            mouseMoving = false;
+            mouseTarget = null;
+        });
+        function setMouseTarget(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            const y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            // Project mouse to world
+            const vector = new THREE.Vector3(x, y, 0.5).unproject(camera);
+            mouseTarget = { x: vector.x, z: vector.z };
+        }
+
+        // Algorithm names and functions
+        const algoList = [
+            { name: 'Breadth-First Search (BFS)', fn: bfs },
+            { name: 'A* (A-Star) Search', fn: astar },
+            { name: 'Greedy Best-First Search', fn: greedy }
+        ];
+        let chosenAlgo = algoList[0];
+
+        function pickRandomAlgoForLevel() {
+            const idx = Math.floor(Math.random() * algoList.length);
+            return algoList[idx];
+        }
+
+        // Create alien model
+        function createAlienModel() {
+            // fallback capsule
+            const geometry = new THREE.CapsuleGeometry(0.5, 1, 4, 8);
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x00ff00,
+                emissive: 0x003300,
+                roughness: 0.7,
+                metalness: 0.3
+            });
+            const alien = new THREE.Mesh(geometry, material);
+            alien.castShadow = true;
+            return alien;
+        }
+
+        // Create guard model
+        function createGuardModel() {
+            const geometry = new THREE.CapsuleGeometry(0.5, 1.2, 4, 8);
+            const material = new THREE.MeshStandardMaterial({
+                color: 0xff0000,
+                emissive: 0x330000,
+                roughness: 0.7,
+                metalness: 0.3
+            });
+            const guard = new THREE.Mesh(geometry, material);
+            guard.castShadow = true;
+            return guard;
+        }
+
+        // For Level 5: random algorithm switching
+        let currentGuardAlgo = null;
+        let guardAlgoTimer = null;
+        function pickRandomAlgo() {
+            const algos = [bfs, astar, greedy];
+            return algos[Math.floor(Math.random() * algos.length)];
+        }
+
+        // Create level
+        function createLevel(levelIndex) {
+            const level = config.levels[levelIndex];
+            scene.background = new THREE.Color(level.background);
+
+            // Clear scene
+            while(scene.children.length > 0) { 
+                scene.remove(scene.children[0]); 
+            }
+            // Build grid (0: empty, 1: wall)
+            grid = Array.from({length: GRID_WIDTH}, () => Array(GRID_HEIGHT).fill(0));
+            // Place walls in grid and scene
+            wallMeshes = [];
+            for (let i = 0; i < level.doors; i++) {
+                const wx = Math.round(Math.cos(i * Math.PI * 2 / level.doors) * 8 + GRID_WIDTH/2);
+                const wz = Math.round(Math.sin(i * Math.PI * 2 / level.doors) * 8 + GRID_HEIGHT/2);
+                grid[wx][wz] = 1;
+                // Wall mesh
+                const wallGeometry = new THREE.BoxGeometry(2, 3, 0.1);
+                const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x404040, roughness: 0.7, metalness: 0.3 });
+                const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+                const [wxPos, wzPos] = fromGrid(wx, wz);
+                wall.position.set(wxPos, 1.5, wzPos);
+                wall.castShadow = true;
+                wall.receiveShadow = true;
+                scene.add(wall);
+                wallMeshes.push(wall);
+            }
+            // Place keys in grid and scene
+            keysArr = [];
+            keyMeshes = [];
+            for (let i = 0; i < level.keys; i++) {
+                const kx = Math.round(Math.cos(i * Math.PI * 2 / level.keys) * 5 + GRID_WIDTH/2);
+                const kz = Math.round(Math.sin(i * Math.PI * 2 / level.keys) * 5 + GRID_HEIGHT/2);
+                keysArr.push({gx: kx, gz: kz, collected: false});
+                // Key mesh
+                const keyGeometry = new THREE.TorusGeometry(0.3, 0.1, 8, 16);
+                const keyMaterial = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0x332200, roughness: 0.3, metalness: 0.7 });
+                const keyMesh = new THREE.Mesh(keyGeometry, keyMaterial);
+                const [kxPos, kzPos] = fromGrid(kx, kz);
+                keyMesh.position.set(kxPos, 1, kzPos);
+                keyMesh.castShadow = true;
+                scene.add(keyMesh);
+                keyMeshes.push(keyMesh);
+            }
+            // Place door in grid and scene (first wall is the door)
+            const doorPos = [Math.round(Math.cos(0) * 8 + GRID_WIDTH/2), Math.round(Math.sin(0) * 8 + GRID_HEIGHT/2)];
+            door = {gx: doorPos[0], gz: doorPos[1], open: false};
+            // Door mesh
+            const doorGeometry = new THREE.BoxGeometry(2, 3, 0.2);
+            const doorMaterial = new THREE.MeshStandardMaterial({ color: 0x00aaff, roughness: 0.5, metalness: 0.8, transparent: true, opacity: 0.8 });
+            doorMesh = new THREE.Mesh(doorGeometry, doorMaterial);
+            const [dxPos, dzPos] = fromGrid(door.gx, door.gz);
+            doorMesh.position.set(dxPos, 1.5, dzPos);
+            doorMesh.castShadow = true;
+            scene.add(doorMesh);
+            // Add lights
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            scene.add(ambientLight);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(5, 5, 5);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+            // Create floor
+            const floorGeometry = new THREE.PlaneGeometry(20, 20);
+            const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x808080, roughness: 0.8, metalness: 0.2 });
+            const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+            // Create player
+            player = createAlienModel();
+            player.position.set(0, 1, 0);
+            scene.add(player);
+            // Place guards
+            guards = [];
+            for (let i = 0; i < level.guards; i++) {
+                const guard = createGuardModel();
+                const angle = (i * Math.PI * 2 / level.guards);
+                const radius = 6;
+                guard.position.set(
+                    Math.cos(angle) * radius,
+                    1,
+                    Math.sin(angle) * radius
+                );
+                scene.add(guard);
+                guards.push(guard);
+            }
+            // For Level 5, start random algo switching
+            if (levelIndex === 4) {
+                currentGuardAlgo = pickRandomAlgo();
+                if (guardAlgoTimer) clearInterval(guardAlgoTimer);
+                guardAlgoTimer = setInterval(() => {
+                    currentGuardAlgo = pickRandomAlgo();
+                    document.getElementById('algo-info').textContent = `Algorithm: Random (${currentGuardAlgo.name})`;
+                }, 3000);
+                // Set the algo name immediately on entering Level 5
+                document.getElementById('algo-info').textContent = `Algorithm: Random (${currentGuardAlgo.name})`;
+            } else {
+                if (guardAlgoTimer) clearInterval(guardAlgoTimer);
+                guardAlgoTimer = null;
+            }
+            // Set camera position
+            camera.position.set(0, 5, 10);
+            camera.lookAt(0, 0, 0);
+            // Pick a random algorithm for this level
+            chosenAlgo = pickRandomAlgoForLevel();
+            document.getElementById('algo-info').textContent = `Algorithm: ${chosenAlgo.name}`;
+        }
+
+        // Input handling
+        const keys = {
+            w: false,
+            a: false,
+            s: false,
+            d: false,
+            space: false
+        };
+
+        window.addEventListener('keydown', (e) => {
+            if (keys.hasOwnProperty(e.key.toLowerCase())) {
+                keys[e.key.toLowerCase()] = true;
+            }
+            // Arrow keys support
+            if (e.key === 'ArrowUp') keys.w = true;
+            if (e.key === 'ArrowDown') keys.s = true;
+            if (e.key === 'ArrowLeft') keys.a = true;
+            if (e.key === 'ArrowRight') keys.d = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (keys.hasOwnProperty(e.key.toLowerCase())) {
+                keys[e.key.toLowerCase()] = false;
+            }
+            // Arrow keys support
+            if (e.key === 'ArrowUp') keys.w = false;
+            if (e.key === 'ArrowDown') keys.s = false;
+            if (e.key === 'ArrowLeft') keys.a = false;
+            if (e.key === 'ArrowRight') keys.d = false;
+            // Handle SPACE for next level
+            if (e.key === ' ' || e.key === 'Spacebar') {
+                if (isLevelComplete) {
+                    currentLevel++;
+                    if (currentLevel >= config.levels.length) {
+                        gameOver('You won!');
+                    } else {
+                        resetLevel();
+                    }
+                }
+            }
+        });
+
+        // Game loop
+        function gameLoop() {
+            if (isGameOver) return;
+
+            // Update game state
+            if (!isLevelComplete) {
+                // Update timer every real second
+                const now = Date.now();
+                if (now - lastTimerUpdate >= 1000) {
+                    gameTime--;
+                    lastTimerUpdate = now;
+                }
+                const minutes = Math.floor(gameTime / 60);
+                const seconds = gameTime % 60;
+                document.getElementById('timer').textContent = 
+                    `Time: ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+                if (gameTime <= 0) {
+                    gameOver('Time\'s up!');
+                }
+
+                // Handle player movement
+                if (player) {
+                    const moveSpeed = 0.2;
+                    let dx = 0, dz = 0;
+                    if (keys.w) dz -= moveSpeed;
+                    if (keys.s) dz += moveSpeed;
+                    if (keys.a) dx -= moveSpeed;
+                    if (keys.d) dx += moveSpeed;
+                    // Mouse-based movement
+                    if (mouseTarget) {
+                        const dirX = mouseTarget.x - player.position.x;
+                        const dirZ = mouseTarget.z - player.position.z;
+                        const len = Math.sqrt(dirX*dirX + dirZ*dirZ);
+                        if (len > 0.1) {
+                            dx += (dirX/len) * moveSpeed;
+                            dz += (dirZ/len) * moveSpeed;
+                        } else {
+                            mouseTarget = null;
+                        }
+                    }
+                    // Check collision with walls and door (if closed)
+                    let blocked = false;
+                    let [gx, gz] = toGrid(player.position.x + dx, player.position.z + dz);
+                    // Clamp gx, gz to valid grid range
+                    gx = Math.max(0, Math.min(GRID_WIDTH - 1, gx));
+                    gz = Math.max(0, Math.min(GRID_HEIGHT - 1, gz));
+                    // Block if out of bounds
+                    if (gx < 0 || gz < 0 || gx >= GRID_WIDTH || gz >= GRID_HEIGHT) blocked = true;
+                    if (grid[Math.round(gx)][Math.round(gz)] === 1) blocked = true;
+                    if (!door.open && Math.abs(player.position.x + dx - doorMesh.position.x) < 1.1 && Math.abs(player.position.z + dz - doorMesh.position.z) < 1.1) blocked = true;
+                    if (!blocked) {
+                        player.position.x += dx;
+                        player.position.z += dz;
+                    }
+                    // Key collection
+                    for (let i = 0; i < keysArr.length; i++) {
+                        const keyObj = keysArr[i];
+                        if (!keyObj.collected && Math.abs(player.position.x - keyMeshes[i].position.x) < 0.6 && Math.abs(player.position.z - keyMeshes[i].position.z) < 0.6) {
+                            keyObj.collected = true;
+                            scene.remove(keyMeshes[i]);
+                        }
+                    }
+                    // Door unlock
+                    if (keysArr.every(k => k.collected)) {
+                        door.open = true;
+                        doorMesh.material.color.set(0x00ff00);
+                        doorMesh.material.opacity = 0.4;
+                    }
+                    // Door exit
+                    if (door.open && Math.abs(player.position.x - doorMesh.position.x) < 1.1 && Math.abs(player.position.z - doorMesh.position.z) < 1.1) {
+                        isLevelComplete = true;
+                        document.querySelector('.level-complete').classList.add('active');
+                    }
+                }
+                // Guard AI for all levels
+                if (guards.length) {
+                    guards.forEach(guard => {
+                        let [gx, gz] = toGrid(guard.position.x, guard.position.z);
+                        let [pgx, pgz] = toGrid(player.position.x, player.position.z);
+                        gx = Math.round(gx); gz = Math.round(gz);
+                        pgx = Math.round(pgx); pgz = Math.round(pgz);
+                        let path = chosenAlgo.fn(grid, [gx, gz], [pgx, pgz]);
+                        // Fallback: if path not found, use A*
+                        if (!path || path.length < 2) {
+                            path = astar(grid, [gx, gz], [pgx, pgz]);
+                        }
+                        // Use level-specific guard speed
+                        const guardSpeed = config.levels[currentLevel].guardSpeed;
+                        if (path && path.length > 1) {
+                            const [nx, nz] = path[1];
+                            const [tx, tz] = fromGrid(nx, nz);
+                            const dirX = tx - guard.position.x;
+                            const dirZ = tz - guard.position.z;
+                            const len = Math.sqrt(dirX*dirX + dirZ*dirZ);
+                            if (len > 0.01) {
+                                guard.position.x += (dirX/len) * guardSpeed;
+                                guard.position.z += (dirZ/len) * guardSpeed;
+                            }
+                        }
+                        // Collision with player
+                        if (Math.abs(guard.position.x - player.position.x) < 0.7 && Math.abs(guard.position.z - player.position.z) < 0.7) {
+                            gameOver('Guard caught you!');
+                        }
+                    });
+                }
+                // Update camera to follow player
+                camera.position.x = player.position.x;
+                camera.position.z = player.position.z + 10;
+                camera.lookAt(player.position);
+            }
+
+            // Handle level completion
+            if (isLevelComplete && keys.space) {
+                currentLevel++;
+                if (currentLevel >= config.levels.length) {
+                    gameOver('You won!');
+                } else {
+                    resetLevel();
+                }
+            }
+
+            // Render scene
+            renderer.render(scene, camera);
+            requestAnimationFrame(gameLoop);
+        }
+
+        function resetLevel() {
+            // Clear scene
+            while(scene.children.length > 0) { 
+                scene.remove(scene.children[0]); 
+            }
+            // Reset game state
+            gameTime = config.levels[currentLevel].timeLimit;
+            lastTimerUpdate = Date.now();
+            isLevelComplete = false;
+            document.getElementById('level-info').textContent = `Level: ${currentLevel + 1} - ${config.levels[currentLevel].name}`;
+            if (currentLevel === 4 && currentGuardAlgo) {
+                document.getElementById('algo-info').textContent = `Algorithm: Random (${currentGuardAlgo.name})`;
+            } else {
+                document.getElementById('algo-info').textContent = `Algorithm: ${chosenAlgo.name}`;
+            }
+            document.querySelector('.level-complete').classList.remove('active');
+            // Create new level
+            createLevel(currentLevel);
+            // Pick a new random algorithm for the new level
+            chosenAlgo = pickRandomAlgoForLevel();
+            document.getElementById('algo-info').textContent = `Algorithm: ${chosenAlgo.name}`;
+        }
+
+        function gameOver(reason) {
+            isGameOver = true;
+            if (guardAlgoTimer) clearInterval(guardAlgoTimer);
+            guardAlgoTimer = null;
+            let gameOverScreen = document.getElementById('game-over-screen');
+            if (!gameOverScreen) {
+                gameOverScreen = document.createElement('div');
+                gameOverScreen.id = 'game-over-screen';
+                document.body.appendChild(gameOverScreen);
+            }
+            gameOverScreen.style.position = 'fixed';
+            gameOverScreen.style.top = '50%';
+            gameOverScreen.style.left = '50%';
+            gameOverScreen.style.transform = 'translate(-50%, -50%)';
+            gameOverScreen.style.backgroundColor = 'rgba(0, 0, 0, 0.9)';
+            gameOverScreen.style.padding = '20px';
+            gameOverScreen.style.borderRadius = '10px';
+            gameOverScreen.style.textAlign = 'center';
+            gameOverScreen.style.zIndex = 1000;
+            if (reason === 'You won!') {
+                gameOverScreen.innerHTML = `
+                    <h2 class="win-message">You Won!</h2>
+                    <p>Congratulations! You completed all levels.</p>
+                    <p>Click Restart to play again</p>
+                `;
+            } else {
+                gameOverScreen.innerHTML = `
+                    <h2>Game Over!</h2>
+                    <p>${reason}</p>
+                    <p>Click Restart to play again</p>
+                `;
+            }
+            gameOverScreen.style.display = 'block';
+        }
+
+        // Add level selection UI
+        const levelSelectDiv = document.createElement('div');
+        levelSelectDiv.id = 'level-select';
+        levelSelectDiv.style.position = 'absolute';
+        levelSelectDiv.style.top = '20px';
+        levelSelectDiv.style.right = '20px';
+        levelSelectDiv.style.padding = '10px';
+        levelSelectDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+        levelSelectDiv.style.borderRadius = '5px';
+        levelSelectDiv.style.zIndex = '1';
+        levelSelectDiv.innerHTML = `
+            <h3>Level Selection</h3>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;">
+                ${config.levels.map((_, i) => `
+                    <button onclick="selectLevel(${i})" style="padding: 5px; margin: 2px;">Level ${i + 1}</button>
+                `).join('')}
+            </div>
+        `;
+        document.getElementById('game-container').appendChild(levelSelectDiv);
+
+        // Level selection function
+        function selectLevel(level) {
+            currentLevel = level;
+            resetLevel();
+        }
+
+        // Add keyboard shortcuts for level selection
+        window.addEventListener('keydown', (e) => {
+            const levelNum = parseInt(e.key);
+            if (levelNum >= 1 && levelNum <= 6) {
+                selectLevel(levelNum - 1);
+            }
+        });
+
+        // Fix restart button functionality
+        document.getElementById('restart-btn').onclick = function() {
+            currentLevel = 0;
+            isGameOver = false;
+            isLevelComplete = false;
+            document.querySelectorAll('.level-complete').forEach(el => el.classList?.remove('active'));
+            const gameOverScreen = document.getElementById('game-over-screen');
+            if (gameOverScreen) gameOverScreen.style.display = 'none';
+            const winMsg = document.querySelector('.win-message');
+            if (winMsg) winMsg.remove();
+            gameTime = config.levels[0].timeLimit;
+            lastTimerUpdate = Date.now();
+            if (guardAlgoTimer) clearInterval(guardAlgoTimer);
+            guardAlgoTimer = null;
+            createLevel(0); // Use createLevel instead of resetLevel
+            requestAnimationFrame(gameLoop);
+        };
+
+        // Modify guard AI for level 6
+        function getGuardAlgorithm(guardIndex, levelIndex) {
+            if (levelIndex === 5) { // Level 6 (index 5)
+                const algorithms = [bfs, astar, greedy];
+                return algorithms[guardIndex % algorithms.length];
+            }
+            return chosenAlgo.fn;
+        }
+
+        // Update guard AI section
+        if (guards.length) {
+            guards.forEach((guard, index) => {
+                let [gx, gz] = toGrid(guard.position.x, guard.position.z);
+                let [pgx, pgz] = toGrid(player.position.x, player.position.z);
+                gx = Math.round(gx); gz = Math.round(gz);
+                pgx = Math.round(pgx); pgz = Math.round(pgz);
+                
+                const guardAlgo = getGuardAlgorithm(index, currentLevel);
+                let path = guardAlgo(grid, [gx, gz], [pgx, pgz]);
+                
+                if (!path || path.length < 2) {
+                    path = astar(grid, [gx, gz], [pgx, pgz]);
+                }
+                
+                const guardSpeed = config.levels[currentLevel].guardSpeed;
+                if (path && path.length > 1) {
+                    const [nx, nz] = path[1];
+                    const [tx, tz] = fromGrid(nx, nz);
+                    const dirX = tx - guard.position.x;
+                    const dirZ = tz - guard.position.z;
+                    const len = Math.sqrt(dirX*dirX + dirZ*dirZ);
+                    if (len > 0.01) {
+                        guard.position.x += (dirX/len) * guardSpeed;
+                        guard.position.z += (dirZ/len) * guardSpeed;
+                    }
+                }
+                
+                if (Math.abs(guard.position.x - player.position.x) < 0.7 && Math.abs(guard.position.z - player.position.z) < 0.7) {
+                    gameOver('Guard caught you!');
+                }
+            });
+        }
+
+        // Start the game
+        createLevel(currentLevel);
+        gameLoop();
+    </script>
+</body>
+</html> 
+
+
+<!-- 
+level 1 bfs
+level 2 dfs 
+3 best first
+4 <A></A>5 random bfs dfs A* Best first search -->
